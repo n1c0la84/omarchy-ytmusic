@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "nicola.ytmusic",
+  "name": "YouTube Music",
+  "version": "0.1.0",
+  "author": "nicola",
+  "license": "MIT",
+  "description": "Search, queue, and play YouTube Music from the bar. Audio plays through a background mpv; no browser window.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "YouTube Music",
+    "description": "Now playing, search, queue, and your library in one bar panel.",
+    "category": "Media",
+    "aliases": [
+      "music",
+      "youtube"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

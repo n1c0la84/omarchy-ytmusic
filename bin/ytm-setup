@@ -1,0 +1,15 @@
+#!/bin/bash
+# Create or update the private Python environment the nicola.ytmusic plugin
+# runs on: ytmusicapi for search/library and a current yt-dlp for playback.
+# The distro yt-dlp lags behind YouTube's changes (its stream URLs get 403),
+# so this one is kept current here instead. Re-run to update both.
+
+set -euo pipefail
+
+venv=${XDG_DATA_HOME:-$HOME/.local/share}/nicola-ytmusic/venv
+
+[[ -x $venv/bin/python ]] || python3 -m venv "$venv"
+"$venv/bin/python" -m pip install --quiet --upgrade pip
+"$venv/bin/python" -m pip install --quiet --upgrade 'yt-dlp[default]' ytmusicapi
+
+echo "yt-dlp $("$venv/bin/yt-dlp" --version), ytmusicapi $("$venv/bin/python" -c 'import ytmusicapi; print(ytmusicapi.__version__)')"

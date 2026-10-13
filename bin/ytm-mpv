@@ -1,0 +1,37 @@
+#!/bin/bash
+# Start the audio-only mpv that plays for the nicola.ytmusic plugin, unless it
+# is already running. It runs as its own transient user unit so playback keeps
+# going while the shell restarts or the plugin reloads; mpv-mpris (from
+# /etc/mpv/scripts) publishes it to MPRIS for media keys and the media widget.
+#
+#   ytm-mpv          start if needed, wait for the IPC socket
+#   ytm-mpv stop     stop playback and the unit
+
+set -euo pipefail
+
+unit=nicola-ytmusic-mpv
+sock=${XDG_RUNTIME_DIR:?}/nicola-ytmusic.sock
+venv=${XDG_DATA_HOME:-$HOME/.local/share}/nicola-ytmusic/venv
+
+if [[ ${1:-} == stop ]]; then
+  systemctl --user stop "$unit" 2>/dev/null || true
+  exit 0
+fi
+
+if ! systemctl --user is-active --quiet "$unit"; then
+  [[ -x $venv/bin/yt-dlp ]] || "$(dirname "$0")/ytm-setup" >/dev/null
+  rm -f "$sock"
+  systemd-run --user --unit="$unit" --collect --quiet \
+    --slice=app-graphical.slice --description="YouTube Music player (nicola.ytmusic)" \
+    mpv --idle=yes --no-video --no-terminal --audio-display=no \
+      --input-ipc-server="$sock" --ytdl-format='bestaudio/best' \
+      --script-opts=ytdl_hook-ytdl_path="$venv/bin/yt-dlp" \
+      --cache=yes --demuxer-max-bytes=50MiB
+fi
+
+for _ in $(seq 50); do
+  [[ -S $sock ]] && exit 0
+  sleep 0.1
+done
+echo "mpv did not open $sock" >&2
+exit 1

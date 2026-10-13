@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""YouTube Music lookups for the nicola.ytmusic shell plugin.
+
+Every command prints one JSON object on stdout and exits 0; failures come back
+as {"error": "..."} so the panel can show them instead of parsing a traceback.
+
+  ytm-helper search <query>         songs matching the query
+  ytm-helper radio <videoId>        the "up next" radio for a song
+  ytm-helper playlists              your library playlists (needs auth)
+  ytm-helper playlist <playlistId>  tracks of a playlist
+  ytm-helper liked                  your liked songs (needs auth)
+  ytm-helper auth-status            whether library access is set up
+  ytm-helper auth <headers-file>    set up library access from browser headers
+"""
+
+import json
+import os
+import sys
+
+AUTH_DIR = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "nicola-ytmusic")
+AUTH_FILE = os.path.join(AUTH_DIR, "browser.json")
+
+
+def out(obj):
+    json.dump(obj, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+
+
+def seconds(text):
+    """'1:02:03' or '4:05' -> seconds; 0 when unknown."""
+    try:
+        total = 0
+        for part in str(text).split(":"):
+            total = total * 60 + int(part)
+        return total
+    except ValueError:
+        return 0
+
+
+def thumb(item):
+    thumbs = item.get("thumbnails") or item.get("thumbnail") or []
+    if isinstance(thumbs, dict):
+        thumbs = thumbs.get("thumbnails") or []
+    return thumbs[-1]["url"] if thumbs else ""
+
+
+def track(item):
+    """Normalize a ytmusicapi song/watch/playlist entry; None if unplayable."""
+    video_id = item.get("videoId")
+    if not video_id:
+        return None
+    artists = ", ".join(a.get("name", "") for a in (item.get("artists") or []) if a.get("name"))
+    album = item.get("album") or {}
+    duration = item.get("duration_seconds") or seconds(item.get("duration") or item.get("length") or "")
+    return {
+        "id": video_id,
+        "title": item.get("title") or "",
+        "artist": artists,
+        "album": album.get("name", "") if isinstance(album, dict) else str(album),
+        "duration": int(duration or 0),
+        "thumb": thumb(item),
+    }
+
+
+def tracks(items):
+    return [t for t in (track(i) for i in items or []) if t]
+
+
+def client(need_auth=False):
+    from ytmusicapi import YTMusic
+
+    if os.path.exists(AUTH_FILE):
+        return YTMusic(AUTH_FILE)
+    if need_auth:
+        raise RuntimeError("Library access is not set up")
+    return YTMusic()
+
+
+def main(argv):
+    if not argv:
+        raise RuntimeError("missing command")
+    cmd, args = argv[0], argv[1:]
+
+    if cmd == "auth-status":
+        return {"auth": os.path.exists(AUTH_FILE)}
+
+    if cmd == "auth":
+        import ytmusicapi
+
+        if len(args) != 1:
+            raise RuntimeError("usage: auth <headers-file>")
+        with open(args[0], encoding="utf-8") as f:
+            headers = f.read()
+        os.makedirs(AUTH_DIR, mode=0o700, exist_ok=True)
+        ytmusicapi.setup(filepath=AUTH_FILE, headers_raw=headers)
+        os.chmod(AUTH_FILE, 0o600)
+        return {"auth": True}
+
+    if cmd == "search":
+        query = " ".join(args).strip()
+        if not query:
+            return {"tracks": []}
+        return {"tracks": tracks(client().search(query, filter="songs", limit=30))}
+
+    if cmd == "radio":
+        if len(args) != 1:
+            raise RuntimeError("usage: radio <videoId>")
+        watch = client().get_watch_playlist(videoId=args[0], limit=25)
+        return {"tracks": [t for t in tracks(watch.get("tracks")) if t["id"] != args[0]]}
+
+    if cmd == "playlists":
+        items = client(need_auth=True).get_library_playlists(limit=100)
+        return {"playlists": [
+            {"id": p.get("playlistId"), "title": p.get("title") or "", "count": str(p.get("count") or ""), "thumb": thumb(p)}
+            for p in items if p.get("playlistId")
+        ]}
+
+    if cmd == "playlist":
+        if len(args) != 1:
+            raise RuntimeError("usage: playlist <playlistId>")
+        data = client().get_playlist(args[0], limit=500)
+        return {"title": data.get("title") or "", "tracks": tracks(data.get("tracks"))}
+
+    if cmd == "liked":
+        data = client(need_auth=True).get_liked_songs(limit=500)
+        return {"title": "Liked songs", "tracks": tracks(data.get("tracks"))}
+
+    raise RuntimeError("unknown command: " + cmd)
+
+
+if __name__ == "__main__":
+    try:
+        out(main(sys.argv[1:]))
+    except ImportError:
+        out({"error": "python-ytmusicapi is not installed"})
+    except Exception as e:  # the panel shows this text as is
+        out({"error": str(e) or e.__class__.__name__})
