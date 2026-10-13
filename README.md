@@ -3,6 +3,18 @@
 Search, queue, and play YouTube Music from the Omarchy bar. No browser window:
 audio plays through a background mpv, so it keeps going across shell reloads.
 
+## Install
+
+Needs Omarchy 4 with its Quickshell shell, plus `mpv`, `mpv-mpris`, `python`
+and `wl-clipboard`:
+
+```bash
+sudo pacman -S --needed mpv mpv-mpris python wl-clipboard
+omarchy plugin add https://github.com/n1c0la84/omarchy-ytmusic.git --enable
+~/.config/omarchy/plugins/nicola.ytmusic/bin/ytm-setup
+omarchy restart shell   # registers the IPC methods
+```
+
 ## Pieces
 
 - `Panel.qml` — bar icon + panel (now playing, search, queue, library).
