@@ -6,6 +6,7 @@ as {"error": "..."} so the panel can show them instead of parsing a traceback.
 
   ytm-helper search <query>         songs matching the query
   ytm-helper radio <videoId>        the "up next" radio for a song
+  ytm-helper lyrics <videoId>       lyrics of a song, timed when available
   ytm-helper playlists              your library playlists (needs auth)
   ytm-helper playlist <playlistId>  tracks of a playlist
   ytm-helper liked                  your liked songs (needs auth)
@@ -66,6 +67,26 @@ def tracks(items):
     return [t for t in (track(i) for i in items or []) if t]
 
 
+def lyrics(yt, video_id):
+    """Lyrics as {"timed", "source", "lines": [{"time": seconds or -1, "text"}]}."""
+    none = {"id": video_id, "timed": False, "source": "", "lines": []}
+    browse_id = yt.get_watch_playlist(videoId=video_id, limit=1).get("lyrics")
+    if not browse_id:
+        return none
+    try:
+        data = yt.get_lyrics(browse_id, timestamps=True)
+    except Exception:  # "might not have lyrics"
+        return none
+    if not data or not data.get("lyrics"):
+        return none
+    source = (data.get("source") or "").removeprefix("Source: ")
+    if data.get("hasTimestamps"):
+        lines = [{"time": line.start_time / 1000, "text": line.text} for line in data["lyrics"]]
+    else:
+        lines = [{"time": -1, "text": text} for text in data["lyrics"].replace("\r\n", "\n").split("\n")]
+    return {"id": video_id, "timed": bool(data.get("hasTimestamps")), "source": source, "lines": lines}
+
+
 def client(need_auth=False):
     from ytmusicapi import YTMusic
 
@@ -107,6 +128,11 @@ def main(argv):
             raise RuntimeError("usage: radio <videoId>")
         watch = client().get_watch_playlist(videoId=args[0], limit=25)
         return {"tracks": [t for t in tracks(watch.get("tracks")) if t["id"] != args[0]]}
+
+    if cmd == "lyrics":
+        if len(args) != 1:
+            raise RuntimeError("usage: lyrics <videoId>")
+        return lyrics(client(), args[0])
 
     if cmd == "playlists":
         items = client(need_auth=True).get_library_playlists(limit=100)

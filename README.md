@@ -17,7 +17,7 @@ omarchy restart shell   # registers the IPC methods
 
 ## Pieces
 
-- `Panel.qml` — bar icon + panel (now playing, search, queue, library).
+- `Panel.qml` — bar icon + panel (now playing, search, queue, lyrics, library).
 - `bin/ytm-helper` — search / radio / library lookups via ytmusicapi, JSON out.
 - `bin/ytm-mpv` — starts the audio-only mpv as the user unit
   `nicola-ytmusic-mpv`, IPC socket `$XDG_RUNTIME_DIR/nicola-ytmusic.sock`.
@@ -37,13 +37,15 @@ metadata). Library login: `~/.local/share/nicola-ytmusic/browser.json`
 - Search + Enter. Click a song to play it (radio keeps going after it),
   right-click to play it next, `+` to add it to the queue.
 - Queue tab: click to jump, right-click or `×` to remove.
+- Lyrics tab: lyrics of the current song from YouTube Music. Timed lyrics
+  highlight and follow the current line; click a line to seek to it.
 - Library tab: import headers once (instructions in the panel), then playlists
   and liked songs; "Play all" / "Shuffle" on a playlist.
 
 ## IPC (for keybindings)
 
 ```
-omarchy-shell nicola.ytmusic toggle|open|close
+omarchy-shell nicola.ytmusic toggle|open|close|lyrics
 omarchy-shell nicola.ytmusic playPause|next|previous|stop
 omarchy-shell nicola.ytmusic search "query"
 omarchy-shell nicola.ytmusic playResult 0

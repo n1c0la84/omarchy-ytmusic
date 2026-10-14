@@ -49,7 +49,7 @@ Panel {
   readonly property bool playing: !!current && !idle && !paused
 
   // ------------------------------------------------------------ browse state
-  property string view: "results"   // results | queue | library
+  property string view: "results"   // results | queue | library | lyrics
   property var results: []
   property string resultsTitle: ""
   property var resultsPlaylist: null  // set when results came from a playlist
@@ -57,6 +57,16 @@ Panel {
   property bool authed: false
   property bool busy: false
   property string error: ""
+
+  // ------------------------------------------------------------ lyrics state
+  property var lyrics: null         // helper output for lyrics.id, see ytm-helper lyrics
+  readonly property bool lyricsWanted: root.opened && root.view === "lyrics"
+  readonly property int lyricsLine: {
+    if (!root.lyrics || !root.lyrics.timed || !root.current || root.lyrics.id !== root.current.id) return -1
+    var lines = root.lyrics.lines, at = -1
+    for (var i = 0; i < lines.length && lines[i].time <= root.position; i++) at = i
+    return at
+  }
 
   // ------------------------------------------------------------ helpers
   function fmt(sec) {
@@ -257,6 +267,26 @@ Panel {
     for (var j = 0; j < fresh.length; j++) loadfile(fresh[j], "append")
   }
 
+  // Fetch lyrics for the current song while the Lyrics tab is open; a song
+  // change during a fetch is picked up when that fetch finishes.
+  function maybeLoadLyrics() {
+    if (!root.lyricsWanted || !root.current || lyricsProc.running) return
+    if (root.lyrics && root.lyrics.id === root.current.id) return
+    lyricsProc.command = [root.python, root.helper, "lyrics", root.current.id]
+    lyricsProc.running = true
+  }
+
+  function handleLyrics(text) {
+    var data
+    try { data = JSON.parse(text) } catch (e) { data = { error: "Unexpected helper output" } }
+    if (data.error) data = { id: lyricsProc.command[3], timed: false, source: "", lines: [], error: data.error }
+    root.lyrics = data
+    maybeLoadLyrics()
+  }
+
+  onLyricsWantedChanged: maybeLoadLyrics()
+  onCurrentChanged: maybeLoadLyrics()
+
   function importAuth() {
     authProc.running = true
   }
@@ -320,6 +350,11 @@ Panel {
   }
 
   Process {
+    id: lyricsProc
+    stdout: StdioCollector { onStreamFinished: root.handleLyrics(text) }
+  }
+
+  Process {
     id: authProc
     command: ["sh", "-c", "f=$(mktemp) && wl-paste > \"$f\" && \"$0\" \"$1\" auth \"$f\"; rm -f \"$f\"", root.python, root.helper]
     stdout: StdioCollector { onStreamFinished: root.handleBrowse("auth", text) }
@@ -336,6 +371,7 @@ Panel {
     function next(): void { root.next() }
     function previous(): void { root.previous() }
     function stop(): void { root.stop() }
+    function lyrics(): void { root.view = "lyrics"; root.open() }
     function search(query: string): void { root.open(); searchField.text = query; root.search(query) }
     function playResult(index: string): void {
       var i = Number(index) || 0
@@ -345,7 +381,7 @@ Panel {
   }
 
   Timer {
-    interval: 1000
+    interval: root.lyricsWanted && root.lyrics && root.lyrics.timed ? 200 : 1000
     repeat: true
     running: socket.connected && !root.idle && !root.paused
     onTriggered: root.pollPosition()
@@ -547,6 +583,12 @@ Panel {
           onClicked: root.view = "queue"
         }
         Button {
+          text: "Lyrics"
+          foreground: root.foreground
+          selected: root.view === "lyrics"
+          onClicked: root.view = "lyrics"
+        }
+        Button {
           text: "Library"
           foreground: root.foreground
           selected: root.view === "library"
@@ -565,8 +607,9 @@ Panel {
           clip: true
           spacing: Style.space(2)
           boundsBehavior: Flickable.StopAtBounds
-          visible: root.view !== "library" || root.authed
-          model: root.view === "queue" ? root.queue
+          visible: root.view !== "lyrics" && (root.view !== "library" || root.authed)
+          model: root.view === "lyrics" ? []
+            : root.view === "queue" ? root.queue
             : root.view === "library" ? [{ liked: true, title: "Liked songs", count: "" }].concat(root.playlists)
             : root.results
 
@@ -727,12 +770,71 @@ Panel {
           }
         }
 
+        // Lyrics: timed ones follow the song and seek on click.
+        ListView {
+          id: lyricsList
+          anchors.fill: parent
+          clip: true
+          spacing: Style.space(6)
+          boundsBehavior: Flickable.StopAtBounds
+          visible: root.view === "lyrics"
+          model: root.view === "lyrics" && root.lyrics && root.current && root.lyrics.id === root.current.id
+            ? root.lyrics.lines : []
+          currentIndex: root.lyricsLine
+          highlightFollowsCurrentItem: true
+          highlightRangeMode: ListView.ApplyRange
+          preferredHighlightBegin: height / 2 - Style.space(20)
+          preferredHighlightEnd: height / 2 + Style.space(20)
+          highlightMoveDuration: 300
+
+          footer: Text {
+            width: lyricsList.width
+            topPadding: Style.space(12)
+            visible: !!(root.lyrics && root.lyrics.source)
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: root.lyrics && root.lyrics.source ? "Lyrics: " + root.lyrics.source : ""
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          delegate: Text {
+            id: lyric
+            required property var modelData
+            required property int index
+            readonly property bool timed: modelData.time >= 0
+            readonly property bool isCurrent: index === root.lyricsLine
+
+            width: lyricsList.width
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: modelData.text
+            color: isCurrent ? root.accent
+              : timed && index > root.lyricsLine ? root.dim
+              : timed ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.4)
+              : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: isCurrent
+
+            MouseArea {
+              anchors.fill: parent
+              enabled: lyric.timed
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.seek(lyric.modelData.time)
+            }
+          }
+        }
+
         // Empty states and library setup
         Column {
           anchors.centerIn: parent
           width: parent.width - Style.space(24)
           spacing: Style.space(10)
-          visible: list.count === 0 || (root.view === "library" && !root.authed)
+          visible: root.view === "lyrics" ? lyricsList.count === 0
+            : list.count === 0 || (root.view === "library" && !root.authed)
 
           Text {
             width: parent.width
@@ -746,6 +848,11 @@ Panel {
               ? "To see your playlists and liked songs, open music.youtube.com in Chrome while signed in, "
                 + "open DevTools (F12) → Network, click any request named \"browse\", "
                 + "right-click it → Copy → Copy request headers, then press Import."
+              : root.view === "lyrics"
+                ? (!root.current ? "Nothing playing"
+                  : lyricsProc.running || !root.lyrics || root.lyrics.id !== root.current.id ? "Loading lyrics…"
+                  : root.lyrics.error ? root.lyrics.error
+                  : "No lyrics for this song")
               : root.view === "queue" ? "The queue is empty"
               : root.busy ? "Searching…"
               : "Type a search and press Enter.\nClick a song to play it, right-click to play it next."
